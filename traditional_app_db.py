@@ -324,9 +324,9 @@ def trade():
             
             # Record trade
             cur.execute('''
-                INSERT INTO trades (user_id, session_id, symbol, action, shares, price, total_cost, order_type)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (session['user_id'], session_id, symbol, 'BUY', shares, price, total_cost, order_type))
+                    INSERT INTO trades (user_id, session_id, symbol, action, shares, price, total_cost)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ''', (session['user_id'], session_id, symbol, 'BUY', shares, price, total_cost))
             
             conn.commit()
             cur.close()
@@ -372,9 +372,9 @@ def trade():
             
             # Record trade
             cur.execute('''
-                INSERT INTO trades (user_id, session_id, symbol, action, shares, price, total_cost, order_type)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (session['user_id'], session_id, symbol, 'SELL', shares, price, total_cost, order_type))
+                INSERT INTO trades (user_id, session_id, symbol, action, shares, price, total_cost)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (session['user_id'], session_id, symbol, 'SELL', shares, price, total_cost))
             
             conn.commit()
             cur.close()
