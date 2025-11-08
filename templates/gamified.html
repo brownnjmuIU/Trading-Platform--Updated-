@@ -347,16 +347,20 @@
                     // Show achievement popup if unlocked
                     if (data.achievement_unlocked) {
                         showAchievementPopup(data.achievement_unlocked);
+                        // Wait for popup to show before reloading
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 2000);
+                    } else {
+                        alert(data.message);
+                        window.location.reload();
                     }
-                    
-                    alert(data.message);
-                    window.location.reload();
                 } else {
                     alert(data.message);
                 }
             } catch (error) {
-                alert('An error occurred while placing your order');
-                console.error(error);
+                console.error('Trade error:', error);
+                alert('Error: ' + error.message);
             }
         }
 
