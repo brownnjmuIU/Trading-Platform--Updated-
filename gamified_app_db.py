@@ -111,27 +111,39 @@ def init_db():
 def init_user():
     if 'session_id' not in session:
         session['session_id'] = os.urandom(16).hex()
-        
-        # Create user in database
+    
+    # Always check if user exists in database, even if session_id exists
+    if 'user_id' not in session:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('''
-            INSERT INTO users (session_id, platform_type, initial_cash, current_cash)
-            VALUES (%s, %s, %s, %s)
-            RETURNING user_id
-        ''', (session['session_id'], 'gamified', 100000.00, 100000.00))
         
-        user = cur.fetchone()
-        session['user_id'] = user['user_id']
+        # Check if user already exists for this session_id
+        cur.execute('SELECT user_id FROM users WHERE session_id = %s', (session['session_id'],))
+        existing_user = cur.fetchone()
         
-        # Unlock only the $100K Portfolio achievement initially
-        cur.execute('''
-            INSERT INTO achievements (user_id, session_id, achievement_name)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (session_id, achievement_name) DO NOTHING
-        ''', (session['user_id'], session['session_id'], '$100K Portfolio'))
+        if existing_user:
+            # User exists, just set the session variable
+            session['user_id'] = existing_user['user_id']
+        else:
+            # Create new user in database
+            cur.execute('''
+                INSERT INTO users (session_id, platform_type, initial_cash, current_cash)
+                VALUES (%s, %s, %s, %s)
+                RETURNING user_id
+            ''', (session['session_id'], 'gamified', 100000.00, 100000.00))
+            
+            user = cur.fetchone()
+            session['user_id'] = user['user_id']
+            
+            # Unlock only the $100K Portfolio achievement initially
+            cur.execute('''
+                INSERT INTO achievements (user_id, session_id, achievement_name)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (session_id, achievement_name) DO NOTHING
+            ''', (session['user_id'], session['session_id'], '$100K Portfolio'))
+            
+            conn.commit()
         
-        conn.commit()
         cur.close()
         conn.close()
 
@@ -307,17 +319,27 @@ def index():
     init_db()  # Ensure tables exist first
     init_stock_data()
     update_stock_prices()
-    init_user()  # Initialize user after stock data is ready
+    init_user()  # Initialize user - this now guarantees user_id is set
+    
+    # IMPORTANT: Only log events AFTER user is fully initialized
     log_event('page_view', {'page': 'home'})
     
     session_id = session['session_id']
+    user_id = session['user_id']  # This is now guaranteed to exist
     
     # Get user's current cash
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT current_cash FROM users WHERE session_id = %s', (session_id,))
+    cur.execute('SELECT current_cash FROM users WHERE user_id = %s', (user_id,))
     user = cur.fetchone()
-    current_cash = float(user['current_cash']) if user else 100000.00
+    
+    if not user:
+        # This should never happen, but just in case
+        cur.close()
+        conn.close()
+        return "Error: User not found in database", 500
+    
+    current_cash = float(user['current_cash'])
     
     # Get portfolio from database
     cur.execute('''
