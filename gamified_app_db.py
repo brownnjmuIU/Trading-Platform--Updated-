@@ -109,43 +109,61 @@ def init_db():
 
 # Initialize session and user
 def init_user():
+    # Always ensure we have a session_id
     if 'session_id' not in session:
         session['session_id'] = os.urandom(16).hex()
+        print(f"Created new session_id: {session['session_id']}")
     
-    # Always check if user exists in database, even if session_id exists
-    if 'user_id' not in session:
-        conn = get_db_connection()
-        cur = conn.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Check if user already exists for this session_id
+    cur.execute('SELECT user_id FROM users WHERE session_id = %s', (session['session_id'],))
+    existing_user = cur.fetchone()
+    
+    if existing_user:
+        # User exists, just set the session variable
+        session['user_id'] = existing_user['user_id']
+        print(f"Found existing user_id: {session['user_id']} for session: {session['session_id']}")
+    else:
+        # Create new user in database
+        print(f"Creating new user for session: {session['session_id']}")
+        cur.execute('''
+            INSERT INTO users (session_id, platform_type, initial_cash, current_cash)
+            VALUES (%s, %s, %s, %s)
+            RETURNING user_id
+        ''', (session['session_id'], 'gamified', 100000.00, 100000.00))
         
-        # Check if user already exists for this session_id
-        cur.execute('SELECT user_id FROM users WHERE session_id = %s', (session['session_id'],))
-        existing_user = cur.fetchone()
+        user = cur.fetchone()
+        session['user_id'] = user['user_id']
+        print(f"Created new user_id: {session['user_id']}")
         
-        if existing_user:
-            # User exists, just set the session variable
-            session['user_id'] = existing_user['user_id']
-        else:
-            # Create new user in database
-            cur.execute('''
-                INSERT INTO users (session_id, platform_type, initial_cash, current_cash)
-                VALUES (%s, %s, %s, %s)
-                RETURNING user_id
-            ''', (session['session_id'], 'gamified', 100000.00, 100000.00))
-            
-            user = cur.fetchone()
-            session['user_id'] = user['user_id']
-            
-            # Unlock only the $100K Portfolio achievement initially
-            cur.execute('''
-                INSERT INTO achievements (user_id, session_id, achievement_name)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (session_id, achievement_name) DO NOTHING
-            ''', (session['user_id'], session['session_id'], '$100K Portfolio'))
-            
-            conn.commit()
+        # Unlock only the $100K Portfolio achievement initially
+        cur.execute('''
+            INSERT INTO achievements (user_id, session_id, achievement_name)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (session_id, achievement_name) DO NOTHING
+        ''', (session['user_id'], session['session_id'], '$100K Portfolio'))
         
-        cur.close()
-        conn.close()
+        conn.commit()
+        print(f"Committed user {session['user_id']} to database")
+    
+    cur.close()
+    conn.close()
+    
+    # Double-check the user exists
+    conn2 = get_db_connection()
+    cur2 = conn2.cursor()
+    cur2.execute('SELECT user_id FROM users WHERE user_id = %s', (session['user_id'],))
+    verify = cur2.fetchone()
+    cur2.close()
+    conn2.close()
+    
+    if not verify:
+        print(f"ERROR: User {session['user_id']} not found after init!")
+        raise Exception(f"User {session['user_id']} does not exist in database")
+    
+    print(f"Verified user {session['user_id']} exists in database")
 
 # Log clickstream event
 def log_event(event_type, event_data=None):
@@ -316,30 +334,35 @@ def get_user_achievements():
 
 @app.route('/')
 def index():
-    init_db()  # Ensure tables exist first
-    init_stock_data()
-    update_stock_prices()
-    init_user()  # Initialize user - this now guarantees user_id is set
-    
-    # IMPORTANT: Only log events AFTER user is fully initialized
-    log_event('page_view', {'page': 'home'})
-    
-    session_id = session['session_id']
-    user_id = session['user_id']  # This is now guaranteed to exist
-    
-    # Get user's current cash
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT current_cash FROM users WHERE user_id = %s', (user_id,))
-    user = cur.fetchone()
-    
-    if not user:
-        # This should never happen, but just in case
-        cur.close()
-        conn.close()
-        return "Error: User not found in database", 500
-    
-    current_cash = float(user['current_cash'])
+    try:
+        init_db()  # Ensure tables exist first
+        init_stock_data()
+        update_stock_prices()
+        init_user()  # Initialize user - this now guarantees user_id is set
+        
+        print(f"After init_user - session_id: {session.get('session_id')}, user_id: {session.get('user_id')}")
+        
+        # IMPORTANT: Only log events AFTER user is fully initialized
+        log_event('page_view', {'page': 'home'})
+        
+        session_id = session['session_id']
+        user_id = session['user_id']  # This is now guaranteed to exist
+        
+        # Get user's current cash
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT current_cash, user_id FROM users WHERE user_id = %s', (user_id,))
+        user = cur.fetchone()
+        
+        if not user:
+            # This should never happen, but just in case
+            print(f"ERROR: User {user_id} not found when querying")
+            cur.close()
+            conn.close()
+            return f"Error: User {user_id} not found in database. Session: {session_id}", 500
+        
+        print(f"Found user: {user}")
+        current_cash = float(user['current_cash'])
     
     # Get portfolio from database
     cur.execute('''
@@ -436,6 +459,12 @@ def index():
                          achievements=achievements,
                          portfolio=portfolio_items,
                          trade_history=formatted_history)
+    
+    except Exception as e:
+        print(f"Index route error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Error loading page: {str(e)}", 500
 
 @app.route('/trade', methods=['POST'])
 def trade():
