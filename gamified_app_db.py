@@ -12,6 +12,20 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'change-this-in-production-please')
 
+db_initialized = False
+
+@app.before_request
+def initialize_once():
+    global db_initialized
+    if not db_initialized:
+        init_db()
+        init_stock_data()
+        db_initialized = True
+
+@app.route("/health")
+def health():
+    return "ok", 200
+
 # Database connection
 def get_db_connection():
     conn = psycopg.connect(
