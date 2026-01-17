@@ -12,6 +12,11 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'change-this-traditional-production')
 
+@app.before_first_request
+def initialize():
+    init_db()
+    init_stock_data()
+
 # Database connection
 def get_db_connection():
     conn = psycopg.connect(
